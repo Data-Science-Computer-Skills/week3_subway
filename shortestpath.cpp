@@ -37,24 +37,24 @@ mat update(mat I, mat weight, int i, int n){
   return I;
 }
 
-int output(mat I, int start, int end){
-  int last_visit = end - 1;
-  cout << "The path from " << start << " to " << end << " is: ";
-  while(last_visit != start-1){
-    cout << (last_visit+1) << "<--";
-    last_visit = I(0, last_visit);
-  }
-  
-  cout << (last_visit+1) << endl;
-  
-  double dist = I(1, end - 1);
-  cout << "distance: " << dist;
-
-  return 0;
-}
+// int output(mat I, int start, int end){
+//   int last_visit = end - 1;
+//   cout << "The path from " << start << " to " << end << " is: ";
+//   while(last_visit != start-1){
+//     cout << (last_visit+1) << "<--";
+//     last_visit = I(0, last_visit);
+//   }
+//   
+//   cout << (last_visit+1) << endl;
+//   
+//   double dist = I(1, end - 1);
+//   cout << "distance: " << dist;
+// 
+//   return 0;
+// }
 
 // [[Rcpp::export]]
-mat find_short_path(mat weight, int start){
+mat computePath(mat weight, int start){
   int n = weight.n_rows;
   
   mat I = zeros<mat>(3, n);         // information matrix
