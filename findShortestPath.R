@@ -1,10 +1,6 @@
 library(readxl)
 library(data.table)
 
-subway <- read_xlsx("merged.xlsx")
-subway <- as.data.table(subway)
-colnames(subway) <- c("Line","Station_start","Station_end","Time")
-
 station_transfer = function(subway){
   # all station (departure station and arrival station)
   station <- subway[,.(All_station = c(Station_start, Station_end[length(Station_end)])),by=Line]
@@ -19,7 +15,7 @@ station_transfer = function(subway){
   return(list(station=station,transfer=transfer))
 }
 
-dist_matrix = function(subway,station,transfer,transferTime = 7){
+dist_matrix = function(subway,station,transfer,transferTime){
   # all station distance matrix
   station_num <- length(station$Rename)
   distance_matrix <-  matrix(10000000, nrow = station_num, ncol = station_num)
@@ -54,7 +50,8 @@ dist_matrix = function(subway,station,transfer,transferTime = 7){
   return(distance_matrix)
 }
 
-findShortestPath = function(location, destination, distance_matrix,station){
+findShortestPath_prepare = function(location, destination, transfer, distance_matrix,station)
+  {
   # test
   Rcpp::sourceCpp("shortestpath.cpp")
   output = function(I_finally, start, end){
@@ -95,8 +92,22 @@ findShortestPath = function(location, destination, distance_matrix,station){
   }
 }
 
-station_transfer_name <- station_transfer(subway)
-station <- station_transfer_name$station
-transfer <- station_transfer_name$transfer
-dist <-  dist_matrix(subway,station,transfer,transferTime = 7) 
-findShortestPath("苹果园", "五道口", dist,station)
+findShortestPath <- function(location, destination, transferTime)
+{
+  subway <- read_xlsx("merged.xlsx")
+  subway <- as.data.table(subway)
+  colnames(subway) <- c("Line","Station_start","Station_end","Time")
+  
+  station_transfer_name <- station_transfer(subway)
+  station <- station_transfer_name$station
+  transfer <- station_transfer_name$transfer
+  dist <-  dist_matrix(subway,station,transfer,transferTime) 
+  findShortestPath_prepare(location, destination, transfer, dist,station)
+}
+
+
+location <- "苹果园"
+destination <-  "五道口"
+transferTime <- 7
+
+findShortestPath(location, destination, transferTime)
