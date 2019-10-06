@@ -1,11 +1,11 @@
-findShortestPath = function(location, destination, transferTime = 7){
-  library(readxl)
-  library(data.table)
-  
-  subway <- read_xlsx("merged.xlsx")
-  subway <- as.data.table(subway)
-  colnames(subway) <- c("Line","Station_start","Station_end","Time")
-  
+library(readxl)
+library(data.table)
+
+subway <- read_xlsx("merged.xlsx")
+subway <- as.data.table(subway)
+colnames(subway) <- c("Line","Station_start","Station_end","Time")
+
+station_transfer = function(subway){
   # all station (departure station and arrival station)
   station <- subway[,.(All_station = c(Station_start, Station_end[length(Station_end)])),by=Line]
   
@@ -16,10 +16,14 @@ findShortestPath = function(location, destination, transferTime = 7){
   station[, Rename := All_station]
   station[station$All_station %in% transfer, Rename := paste(Line, All_station, sep = '-')]
   
+  return(list(station=station,transfer=transfer))
+}
+
+dist_matrix = function(subway,station,transfer,transferTime = 7){
   # all station distance matrix
   station_num <- length(station$Rename)
-  dist_matrix <-  matrix(10000000, nrow = station_num, ncol = station_num)
-  diag(dist_matrix) <- 0   # diag = 0
+  distance_matrix <-  matrix(10000000, nrow = station_num, ncol = station_num)
+  diag(distance_matrix) <- 0   # diag = 0
   
   line_unique <- unique(subway$Line)
   start_index <- 0
@@ -27,7 +31,7 @@ findShortestPath = function(location, destination, transferTime = 7){
   for(i in 1:length(line_unique)){
     time_by_line <- subway[Line ==line_unique[i], Time]
     n_time <- length(time_by_line)
-    diag(dist_matrix[(start_index+1):(start_index+n_time), 
+    diag(distance_matrix[(start_index+1):(start_index+n_time), 
                      (start_index+2):(start_index+n_time+1)]) <- time_by_line
     start_index <- start_index + n_time + 1
   }
@@ -35,19 +39,22 @@ findShortestPath = function(location, destination, transferTime = 7){
   # add transfer station distance
   transfer_dist <- transferTime  # set transfer time
   transfer_index <- sapply(transfer, function(x) which(x == station$All_station))
-  sapply(transfer_index, function(x) dist_matrix[x[1], x[2]] <<- transfer_dist)
+  sapply(transfer_index, function(x) distance_matrix[x[1], x[2]] <<- transfer_dist)
   
   # circle station
   which(subway == "2-西直门")
   which(subway == "2-车公庄")
   which(subway == "巴沟")
   which(subway == "火器营")
-  dist_matrix[24, 41] <- 2
-  dist_matrix[199, 243] <- 3
+  distance_matrix[24, 41] <- 2
+  distance_matrix[199, 243] <- 3
   
   # upper triangular to symmetry
-  dist_matrix[lower.tri(dist_matrix)] <- t(dist_matrix)[lower.tri(dist_matrix)]
-  
+  distance_matrix[lower.tri(distance_matrix)] <- t(distance_matrix)[lower.tri(distance_matrix)]
+  return(distance_matrix)
+}
+
+findShortestPath = function(location, destination, distance_matrix,station){
   # test
   Rcpp::sourceCpp("shortestpath.cpp")
   output = function(I_finally, start, end){
@@ -62,7 +69,7 @@ findShortestPath = function(location, destination, transferTime = 7){
     return(list(path = path, distance = dist))
   }
   
-  W = dist_matrix
+  W = distance_matrix
   
   n <-  nrow(W)
   subway <- station$Rename
@@ -87,4 +94,9 @@ findShortestPath = function(location, destination, transferTime = 7){
     print("error input")
   }
 }
-  
+
+station_transfer_name <- station_transfer(subway)
+station <- station_transfer_name$station
+transfer <- station_transfer_name$transfer
+dist <-  dist_matrix(subway,station,transfer,transferTime = 7) 
+findShortestPath("苹果园", "五道口", dist,station)
