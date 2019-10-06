@@ -1,0 +1,222 @@
+---
+title: "findShortestPath"
+author: "Denglinsui, Zhangmaoyu, Suyonghua"
+date: "2019/10/6"
+output: html_document
+---
+
+## Shortest Path of subway in Beijing
+
+To find the shortest path between two stations of Beijing's subway, we introduce Dijkstra's shortest path algorithm. This algorithm is a greedy algorithm. The key idea is finding the shortest path bewteem the start point and unvisited points in each step and comparing the former distance with the distance considering the shortest path. 
+
+### Rcpp: Dijkstra's algorithm
+In the Rcpp file, we want to realize the Dijkstra's algorithm. The input is the distance matrix and the start point and the output is a matrix $I$. The top two row represents the previous point and distance of the shortest path between the start point and the correpsonding point respectively. And the last row represents whether the point is visited in the process. 
+
+When this matrix is given, it's convinient to extract the useful information in the R file so that find the shortest path between the start point and the end point.
+
+```{rcpp Dijstra, include=F}
+// [[Rcpp::export]]
+#include <RcppArmadillo.h>
+#include <stack>
+#include <iostream>
+// [[Rcpp::depends(RcppArmadillo)]]
+using namespace arma;
+using namespace std;
+
+mat update(mat I, mat weight, int i, int n){
+  vec index_left(n - i - 1);
+  int k = 0;
+    for(int j = 0; j < n; j++){
+      if(I(2, j) == 0){
+        index_left(k) = j;
+        // find the index of subway that have not been visited
+        k += 1;
+      }
+    }
+  
+    int min_index = index_left(0);
+    for(int j = 1; j < n-i-1; j++){
+      if(I(1, index_left(j)) < I(1, min_index))
+        min_index = index_left(j);
+      //find index with the minimum distance
+  }
+
+  double update_dist;
+  for(int j = 0; j < n-i-1; j++){
+    update_dist = I(1, min_index) + weight(min_index, index_left(j));
+    if(update_dist < I(1, index_left(j))){
+      I(1, index_left(j)) = update_dist;
+      I(0, index_left(j)) = min_index;
+      // update distance and is_visit by comparison.
+    }
+  }
+
+  I(2, min_index) = 1;
+  return I;
+}
+mat computePath(mat weight, int start){
+  int n = weight.n_rows;
+  
+  mat I = zeros<mat>(3, n);         // information matrix
+  for(int i = 0 ; i < n; i++){     
+    I(0, i) = start - 1;            // initialize I
+    I(1, i) = weight(start - 1, i);
+  }
+  I(2, start - 1) = 1;
+  
+  for(int i = 0; i < n-2; i++){
+    I = update(I, weight, i, n);    // unpdate I by n-2 times
+  }
+  // output(I, start, end);
+  return I;
+}
+```
+
+
+### R: Construct the distance matrix
+
+As usual, we library the relevant packages first:
+```{r library}
+library(readxl)
+library(data.table)
+```
+
+After that, we recognizing the transfer stations by counting the lines that each station is in. To make every station into consideration, we count all the start stations and the end stations. We regard the transfer station in different lines as different stations in convinience and give each station a unique code.
+```{r transfer}
+station_transfer = function(subway){
+  # all station (departure station and arrival station)
+  station <- subway[,.(All_station = c(Station_start,
+                                       Station_end[length(Station_end)])),by=Line]
+  
+  # find transfer station
+  transfer <- station[,.(times = length(Line)),by=All_station][times > 1, All_station]
+  
+  # rename transfer station
+  station[, Rename := All_station]
+  station[station$All_station %in% transfer, Rename := paste(Line, All_station, sep = '-')]
+  
+  return(list(station=station,transfer=transfer))
+}
+```
+
+Transfer time also plays an important role when chosing the optimum path, so we set a fixed transfer time. The i-th row and j-th column element of distance matrix represents the transportation time of the i-th station and the j-th station. It worths mentioning that the distance is evaluated by the time rather than the true distance.
+
+When dealing with the transfer station, we collect all codes representing the same transfer station and create new records in the subway.
+
+Noticing there are circle stations, we add the corrsponding line for them.
+
+Finally, since we only consider the one-way route, we obtain the whole matrix by symmetry. 
+```{r dist_matrix}
+dist_matrix = function(subway,station,transfer,transferTime){
+  # all station distance matrix
+  station_num <- length(station$Rename)
+  distance_matrix <-  matrix(10000000, nrow = station_num, ncol = station_num)
+  diag(distance_matrix) <- 0   # diag = 0
+  
+  line_unique <- unique(subway$Line)
+  start_index <- 0
+  ## fill each small matrix by Line, upper triangular matirx
+  for(i in 1:length(line_unique)){
+    time_by_line <- subway[Line ==line_unique[i], Time]
+    n_time <- length(time_by_line)
+    diag(distance_matrix[(start_index+1):(start_index+n_time), 
+                     (start_index+2):(start_index+n_time+1)]) <- time_by_line
+    start_index <- start_index + n_time + 1
+  }
+  
+  # add transfer station distance
+  transfer_dist <- transferTime  # set transfer time
+  transfer_index <- sapply(transfer, function(x) which(x == station$All_station))
+  sapply(transfer_index, function(x) distance_matrix[x[1], x[2]] <<- transfer_dist)
+  
+  # circle station
+  which(subway == "2-西直门")
+  which(subway == "2-车公庄")
+  which(subway == "巴沟")
+  which(subway == "火器营")
+  distance_matrix[24, 41] <- 2
+  distance_matrix[199, 243] <- 3
+  
+  # upper triangular to symmetry
+  distance_matrix[lower.tri(distance_matrix)] <- t(distance_matrix)[lower.tri(distance_matrix)]
+  return(distance_matrix)
+}
+```
+
+
+### R: Find the shortest path
+In this step, we combine the Dijkstra's shortest path algorithm, the unique codes of stations and distance matrix construction as a whole. What's more, we extract the path information of the shortest path, print the path and total distance (time).
+```{r findShortestPath_prepare}
+findShortestPath_prepare = function(location, destination, transfer, distance_matrix,station)
+  {
+  # test
+  Rcpp::sourceCpp("shortestpath.cpp")
+  output = function(I_finally, start, end){
+    I_finally[1,] <- I_finally[1, ] + 1    # change C++ index to R index
+    last_visit <- end
+    path <- c(last_visit)
+    dist <- I_finally[2, last_visit]
+    while (last_visit != start) {
+      last_visit <- I_finally[1, last_visit]
+      path <- c(last_visit, path)
+    }
+    return(list(path = path, distance = dist))
+  }
+  
+  W = distance_matrix
+  
+  n <-  nrow(W)
+  subway <- station$Rename
+  
+  # judge whether location or destination is transfer station
+  if(location %in% transfer)
+    location <- station[All_station == location, Rename][1]
+  if(destination %in% transfer)
+    destination <- station[All_station == destination, Rename][1]
+  start_num <- which(subway == location)
+  end_num <- which(subway == destination)
+  
+  # Make sure local and destination are in the subway.
+  if(length(start_num) > 0 & length(end_num) > 0){
+    I_res <- computePath(weight = W, start = start_num)
+    path_res <- output(I_finally = I_res, start = start_num, end = end_num)
+    cat("The shortest path from", location, "to", destination, "is:\n", 
+        paste(subway[path_res$path], collapse = ' --> '), 
+        "\nThe total distance is:\n",
+        path_res$distance)
+  }else{
+    print("error input")
+  }
+}
+```
+
+We construct a more breif function to realize our goal.
+```{r findShortestPath}
+findShortestPath <- function(location, destination, transferTime)
+{
+  subway <- read_xlsx("merged.xlsx")
+  subway <- as.data.table(subway)
+  colnames(subway) <- c("Line","Station_start","Station_end","Time")
+  
+  station_transfer_name <- station_transfer(subway)
+  station <- station_transfer_name$station
+  transfer <- station_transfer_name$transfer
+  dist <-  dist_matrix(subway,station,transfer,transferTime) 
+  findShortestPath_prepare(location, destination, transfer, dist,station)
+}
+
+```
+
+
+### R: Test
+
+We finally test the `findShortestPath`. We chose the 苹果园 as the start station, 五道口 as the end station and 7 as the transfer time. 
+```{r test, message= F}
+location <- "苹果园"
+destination <-  "五道口"
+transferTime <- 7
+
+findShortestPath(location, destination, transferTime)
+```
+
+We can find the path is exactly the shortest path.
