@@ -1,6 +1,6 @@
 ---
 title: "findShortestPath"
-author: "Denglinsui, Zhangmaoyu, Suyonghua"
+author: "Linsui Deng 2019000152, Yonghua Su 2019000154, Maoyu Zhang 2019000157"
 date: "2019/10/6"
 output: html_document
 ---
